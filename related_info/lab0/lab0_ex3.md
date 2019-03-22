@@ -49,5 +49,5 @@ unsigned intr;
 intr=8;
 SETGATE(intr, 0,1,2,3);
 ```
-请问执行上述指令后， intr的值是多少？
+请问执行上述指令后， intr的值是多少？ // 0x00010002
 

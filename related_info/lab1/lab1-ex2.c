@@ -18,7 +18,7 @@ void A()
 }
 
 
-void B(int d, int e, int f)
+void B(int d, int e, int f) // 函数栈？
 {
 	int g;
 	unsigned int _ebp;

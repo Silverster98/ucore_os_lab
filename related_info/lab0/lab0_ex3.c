@@ -44,9 +44,11 @@ main(void)
     gintr=*((struct gatedesc *)&intr);
     SETGATE(gintr, 0,1,2,3);
     intr=*(unsigned *)&(gintr);
-    printf("intr is 0x%x\n",intr);
-    printf("gintr is 0x%llx\n",gintr);
-    
+    // printf("%p %p\n", &intr, &gintr);
+    // printf("%d %d\n", *(&intr), *(&intr+1));
+    printf("intr is 0x%x\n",intr); // 0x00010002
+    printf("gintr is 0x%llx\n",gintr); // 0x0000ee0000010002
+    printf("%d %d\n", (int)sizeof(long), (int)sizeof(struct gatedesc)); // 32bit sizeof(long) = 4, sizeof(long long) = 8;
     return 0;
 }
 

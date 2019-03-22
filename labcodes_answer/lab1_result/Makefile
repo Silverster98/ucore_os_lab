@@ -192,6 +192,10 @@ ifeq ($(call match,$(MAKECMDGOALS),$(IGNORE_ALLDEPS)),0)
 endif
 
 # files for grade script
+printTar: 
+	@echo $(TARGETS)
+	@echo $(bootblock)
+	@echo $(KOBJS)
 
 TARGETS: $(TARGETS)
 all: $(TARGETS)
