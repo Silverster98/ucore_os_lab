@@ -204,20 +204,23 @@ page_init(void) {
             }
         }
     }
+    cprintf("maxpa:%08llx\n", maxpa);
     if (maxpa > KMEMSIZE) {
         maxpa = KMEMSIZE;
     }
 
-    extern char end[];
+    extern char end[]; // 0xc011af28,内核结束地址
 
     npage = maxpa / PGSIZE;
-    pages = (struct Page *)ROUNDUP((void *)end, PGSIZE);
+    pages = (struct Page *)ROUNDUP((void *)end, PGSIZE); // 管理内存的Page数据结构起始地址
+    cprintf("kernel_end:%08lx  pages:%08lx  npage:%d\n", end, pages, npage); // kernel_end:c011af28  pages:c011b000  npage:32736
 
     for (i = 0; i < npage; i ++) {
-        SetPageReserved(pages + i);
+        SetPageReserved(pages + i);  // 所有物理页均设为保留（for kernel）
     }
 
-    uintptr_t freemem = PADDR((uintptr_t)pages + sizeof(struct Page) * npage);
+    uintptr_t freemem = PADDR((uintptr_t)pages + sizeof(struct Page) * npage); // 空闲空间（真实可用的）
+    cprintf("freemem:%08x　sizeof(Page):%d\n", freemem, sizeof(struct Page));
 
     for (i = 0; i < memmap->nr_map; i ++) {
         uint64_t begin = memmap->map[i].addr, end = begin + memmap->map[i].size;
@@ -229,10 +232,10 @@ page_init(void) {
                 end = KMEMSIZE;
             }
             if (begin < end) {
-                begin = ROUNDUP(begin, PGSIZE);
-                end = ROUNDDOWN(end, PGSIZE);
+                begin = ROUNDUP(begin, PGSIZE); // 真实空闲区起始，一般是ROUNDUP(freemem)
+                end = ROUNDDOWN(end, PGSIZE); // 一般就是ROUNDDOWN(maxpa)
                 if (begin < end) {
-                    init_memmap(pa2page(begin), (end - begin) / PGSIZE);
+                    init_memmap(pa2page(begin), (end - begin) / PGSIZE); // 对真实空闲区对应的Page数据结构初始化
                 }
             }
         }
@@ -359,6 +362,19 @@ get_pte(pde_t *pgdir, uintptr_t la, bool create) {
     }
     return NULL;          // (8) return page table entry
 #endif
+    pde_t *pdep = &pgdir[PDX(la)]; // 根据la获取页目录表中的一项
+    if (!(*pdep & PTE_P)) { // 判断是否存在这一项，存在就返回这一项地址，不存在新建一项
+        struct Page *page;
+        // 申请一页作为页表，对应页目录项是　*pdep
+        if (!create || (page = alloc_page()) == NULL) { // 不分配或分配页失败
+            return NULL;
+        }
+        set_page_ref(page, 1); // 设置页引用为１
+        uintptr_t pa = page2pa(page); // 获取该物理页对应的物理地址
+        memset(KADDR(pa), 0, PGSIZE); // 转化为物理内核虚地址，并清空页内容
+        *pdep = pa | PTE_U | PTE_W | PTE_P; // 设置该项地址属性
+    }
+    return &((pte_t *)KADDR(PDE_ADDR(*pdep)))[PTX(la)]; // 取出页表中对应的该项，是在新申请的页中，是没有内容的。
 }
 
 //get_page - get related Page struct for linear address la using PDT pgdir
@@ -404,6 +420,16 @@ page_remove_pte(pde_t *pgdir, uintptr_t la, pte_t *ptep) {
                                   //(6) flush tlb
     }
 #endif
+    if (!(*ptep & PTE_P)) {
+        cprintf("ERROR: block associated with ptep doesn't exist");
+    } else {
+        struct Page *page = pte2page(*ptep);
+        if (page_ref_dec(page) == 0) {
+            free_page(page);
+        }
+        *ptep = 0;
+        tlb_invalidate(pgdir, la);
+    }
 }
 
 //page_remove - free an Page which is related linear address la and has an validated pte
@@ -430,16 +456,16 @@ page_insert(pde_t *pgdir, struct Page *page, uintptr_t la, uint32_t perm) {
         return -E_NO_MEM;
     }
     page_ref_inc(page);
-    if (*ptep & PTE_P) {
+    if (*ptep & PTE_P) { // 该项存在
         struct Page *p = pte2page(*ptep);
-        if (p == page) {
+        if (p == page) { // 该Page已存在页表项中
             page_ref_dec(page);
         }
-        else {
+        else { // 该项被占用，需移除
             page_remove_pte(pgdir, la, ptep);
         }
     }
-    *ptep = page2pa(page) | PTE_P | perm;
+    *ptep = page2pa(page) | PTE_P | perm; // 页表项中插入该Page
     tlb_invalidate(pgdir, la);
     return 0;
 }
@@ -462,6 +488,7 @@ check_alloc_page(void) {
 static void
 check_pgdir(void) {
     assert(npage <= KMEMSIZE / PGSIZE);
+    cprintf("boot_pgdir=0x%08x\n", (uint32_t)boot_pgdir); // 0xc0118000
     assert(boot_pgdir != NULL && (uint32_t)PGOFF(boot_pgdir) == 0);
     assert(get_page(boot_pgdir, 0x0, NULL) == NULL);
 
@@ -485,9 +512,9 @@ check_pgdir(void) {
     assert(boot_pgdir[0] & PTE_U);
     assert(page_ref(p2) == 1);
 
-    assert(page_insert(boot_pgdir, p1, PGSIZE, 0) == 0);
-    assert(page_ref(p1) == 2);
-    assert(page_ref(p2) == 0);
+    assert(page_insert(boot_pgdir, p1, PGSIZE, 0) == 0); // PGSIZE 对应的物理页改为p1
+    assert(page_ref(p1) == 2); // 此时p1的引用变为2
+    assert(page_ref(p2) == 0); // p2移除，引用为0
     assert((ptep = get_pte(boot_pgdir, PGSIZE, 0)) != NULL);
     assert(pte2page(*ptep) == p1);
     assert((*ptep & PTE_U) == 0);

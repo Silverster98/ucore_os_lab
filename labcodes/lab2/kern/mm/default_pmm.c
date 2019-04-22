@@ -110,13 +110,13 @@ default_init_memmap(struct Page *base, size_t n) {
     struct Page *p = base;
     for (; p != base + n; p ++) {
         assert(PageReserved(p));
-        p->flags = p->property = 0;
-        set_page_ref(p, 0);
+        p->flags = p->property = 0; // flag=0（bit0=0,bit1=0,非保留，但不可用）,连续空闲页个数为0
+        set_page_ref(p, 0); // 引用为0
     }
-    base->property = n;
-    SetPageProperty(base);
+    base->property = n; // 在本实验中，Page数据结构的成员变量property用来记录某连续内存空闲块的大小（即地址连续的空闲页的个数）
+    SetPageProperty(base); // base开头的这一块区域是free的，即设置flag的bit1=1
     nr_free += n;
-    list_add(&free_list, &(base->page_link));
+    list_add(&free_list, &(base->page_link)); // 空闲区链加入这个新的空闲块
 }
 
 static struct Page *
@@ -135,12 +135,15 @@ default_alloc_pages(size_t n) {
         }
     }
     if (page != NULL) {
-        list_del(&(page->page_link));
+        // list_del(&(page->page_link));
+        // 把多余的空闲块插入此空闲块后，然后再删除此空闲块
         if (page->property > n) {
             struct Page *p = page + n;
             p->property = page->property - n;
-            list_add(&free_list, &(p->page_link));
-    }
+            list_add_after(&(page->page_link), &(p->page_link));
+            SetPageProperty(p);
+        }
+        list_del(&(page->page_link));
         nr_free -= n;
         ClearPageProperty(page);
     }
@@ -175,7 +178,17 @@ default_free_pages(struct Page *base, size_t n) {
         }
     }
     nr_free += n;
-    list_add(&free_list, &(base->page_link));
+    // add code
+    // 需要找到第一个地址比base大的空闲块，然后插在他的前面
+    le = list_next(&free_list);
+    while (le != &free_list) {
+        p = le2page(le, page_link);
+        if (base + base->property <= p) {
+            break;
+        }
+        le = list_next(le);
+    }
+    list_add_before(le, &(base->page_link));
 }
 
 static size_t

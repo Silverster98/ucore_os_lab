@@ -1,6 +1,7 @@
 #include <mmu.h>
 #include <memlayout.h>
 
+# KERNBASE = 0xC0000000
 #define REALLOC(x) (x - KERNBASE)
 
 .text
@@ -62,7 +63,7 @@ __boot_pgdir:
     .space PGSIZE - (. - __boot_pgdir) # pad to PGSIZE
 
 .set i, 0
-__boot_pt1:
+__boot_pt1: # 页目录表
 .rept 1024
     .long i * PGSIZE + (PTE_P | PTE_W)
     .set i, i + 1
